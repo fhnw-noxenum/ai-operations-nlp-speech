@@ -1,0 +1,7 @@
+fastrtc[vad]==0.0.34
+groq>=0.11.0
+elevenlabs>=1.50.0,<2
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+numpy>=1.26.0
+python-dotenv>=1.0.0

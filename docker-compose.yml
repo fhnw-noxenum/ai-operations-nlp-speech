@@ -1,0 +1,23 @@
+services:
+  voice-app:
+    build: ./voice-app
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - METRICS_DB=/data/metrics.sqlite
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  metrics-ui:
+    build: ./metrics-ui
+    ports:
+      - "8501:8501"
+    environment:
+      - METRICS_DB=/data/metrics.sqlite
+    volumes:
+      - ./data:/data
+    depends_on:
+      - voice-app
+    restart: unless-stopped
