@@ -25,7 +25,6 @@ from groq import Groq
 from metrics import TurnTrace
 from sentence_split import SentenceSplitter
 
-
 GROQ = Groq()
 ELEVEN = ElevenLabs()
 
@@ -96,6 +95,7 @@ def transcribe_audio(audio: tuple[int, np.ndarray]) -> str:
         file=("turn.wav", audio_to_bytes(audio)),
         model=GROQ_STT_MODEL,
         response_format="json",
+        language="de",
     )
     return transcription.text or ""
 
