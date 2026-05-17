@@ -64,6 +64,7 @@ def _llm_kwargs() -> dict:
 
 def _tts_stream_to_audio(text: str) -> Iterator[np.ndarray]:
     """ElevenLabs TTS-Stream → numpy int16-Chunks mit (rate, samples)-Shape."""
+    emitted_samples = 0
     stream = ELEVEN.text_to_speech.convert_as_stream(
         voice_id=TTS_VOICE,
         text=text,
@@ -78,7 +79,10 @@ def _tts_stream_to_audio(text: str) -> Iterator[np.ndarray]:
         samples = np.frombuffer(chunk, dtype=np.int16)
         if samples.size == 0:
             continue
+        emitted_samples += samples.size
         yield samples.reshape(1, -1)
+    if emitted_samples == 0:
+        print(f"[tts] no audio returned for text: {text!r}", flush=True)
 
 
 def _tts_full_audio(text: str) -> np.ndarray:
@@ -169,6 +173,6 @@ def run_streaming(transcript: str, trace: TurnTrace) -> Iterator:
             if not first_audio_stamped:
                 trace.stamp("t_tts_first")
                 first_audio_stamped = True
-                yield (TTS_SAMPLE_RATE, samples)
+            yield (TTS_SAMPLE_RATE, samples)
 
     trace.response = "".join(full_response)
