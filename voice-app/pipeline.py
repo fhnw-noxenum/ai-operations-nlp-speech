@@ -15,6 +15,8 @@ Beide Modi instrumentieren TurnTrace; das Dashboard zeigt die Differenz.
 from __future__ import annotations
 
 import os
+from collections import deque
+from threading import Lock
 from typing import Iterator
 
 import numpy as np
@@ -36,6 +38,7 @@ LLM_SYSTEM = os.environ.get(
     "LLM_SYSTEM_PROMPT",
     "Du bist ein hilfsbereiter Voice-Assistent. Antworte immer auf Deutsch, auch wenn die Eingabe in einer anderen Sprache ist. Antworte in 1-2 kurzen Sätzen.",
 )
+LLM_HISTORY_TURNS = max(0, int(os.environ.get("LLM_HISTORY_TURNS", "8")))
 
 GROQ_STT_MODEL = os.environ.get("GROQ_STT_MODEL", "whisper-large-v3-turbo")
 
@@ -46,6 +49,9 @@ TTS_LANGUAGE = os.environ.get("TTS_LANGUAGE_CODE", "de").strip() or None
 
 # ElevenLabs PCM 24000 → 24 kHz mono int16
 TTS_SAMPLE_RATE = 24000
+
+_HISTORY: deque[dict[str, str]] = deque(maxlen=LLM_HISTORY_TURNS * 2)
+_HISTORY_LOCK = Lock()
 
 
 # ---------------------------------------------------------------- helpers
@@ -60,6 +66,32 @@ def _llm_kwargs() -> dict:
         # gpt-oss family supports include_reasoning; harmless on others
         # (Groq erlaubt unbekannte Felder via extra_body; wir lassen es weg)
     )
+
+
+def _llm_messages(transcript: str) -> list[dict[str, str]]:
+    with _HISTORY_LOCK:
+        history = list(_HISTORY)
+    return [
+        {"role": "system", "content": LLM_SYSTEM},
+        *history,
+        {"role": "user", "content": transcript},
+    ]
+
+
+def _remember_turn(transcript: str, answer: str) -> None:
+    if LLM_HISTORY_TURNS <= 0:
+        return
+    with _HISTORY_LOCK:
+        _HISTORY.append({"role": "user", "content": transcript})
+        _HISTORY.append({"role": "assistant", "content": answer})
+
+
+def reset_conversation_history() -> None:
+    with _HISTORY_LOCK:
+        if not _HISTORY:
+            return
+        _HISTORY.clear()
+    print("[conversation] history reset", flush=True)
 
 
 def _tts_stream_to_audio(text: str) -> Iterator[np.ndarray]:
@@ -110,10 +142,7 @@ def transcribe_audio(audio: tuple[int, np.ndarray]) -> str:
 def run_sequential(transcript: str, trace: TurnTrace) -> Iterator:
     """STT done → vollständige LLM-Antwort sammeln → komplette TTS."""
     completion = GROQ.chat.completions.create(
-        messages=[
-            {"role": "system", "content": LLM_SYSTEM},
-            {"role": "user", "content": transcript},
-        ],
+        messages=_llm_messages(transcript),
         stream=False,
         **_llm_kwargs(),
     )
@@ -121,6 +150,7 @@ def run_sequential(transcript: str, trace: TurnTrace) -> Iterator:
     answer = completion.choices[0].message.content or ""
     trace.stamp("t_llm_done")
     trace.response = answer
+    _remember_turn(transcript, answer)
     print(f"[seq] LLM: {answer!r}", flush=True)
 
     samples = _tts_full_audio(answer)
@@ -132,10 +162,7 @@ def run_sequential(transcript: str, trace: TurnTrace) -> Iterator:
 def run_streaming(transcript: str, trace: TurnTrace) -> Iterator:
     """LLM-Token-Stream → Sentence-Splitter → sofort TTS pro Satz."""
     stream = GROQ.chat.completions.create(
-        messages=[
-            {"role": "system", "content": LLM_SYSTEM},
-            {"role": "user", "content": transcript},
-        ],
+        messages=_llm_messages(transcript),
         stream=True,
         **_llm_kwargs(),
     )
@@ -175,4 +202,6 @@ def run_streaming(transcript: str, trace: TurnTrace) -> Iterator:
                 first_audio_stamped = True
             yield (TTS_SAMPLE_RATE, samples)
 
-    trace.response = "".join(full_response)
+    answer = "".join(full_response)
+    trace.response = answer
+    _remember_turn(transcript, answer)

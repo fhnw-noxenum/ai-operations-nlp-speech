@@ -30,7 +30,12 @@ from fastrtc import (
 load_dotenv()
 
 from metrics import TurnTrace, recent_turns  # noqa: E402
-from pipeline import run_sequential, run_streaming, transcribe_audio  # noqa: E402
+from pipeline import (  # noqa: E402
+    reset_conversation_history,
+    run_sequential,
+    run_streaming,
+    transcribe_audio,
+)
 
 
 MODE = os.environ.get("PIPELINE_MODE", "streaming").strip().lower()
@@ -57,8 +62,8 @@ _original_webrtc_handle_offer = WebRTC.handle_offer
 
 async def _handle_offer_with_pending_ice(self, body, set_outputs):
     """Wait briefly for the SDP offer if trickle ICE arrives first."""
+    webrtc_id = body.get("webrtc_id")
     if body.get("type") == "ice-candidate" and "candidate" in body:
-        webrtc_id = body.get("webrtc_id")
         if webrtc_id not in self.pcs:
             for _ in range(40):
                 await asyncio.sleep(0.05)
@@ -70,6 +75,8 @@ async def _handle_offer_with_pending_ice(self, body, set_outputs):
                     flush=True,
                 )
                 return JSONResponse({"status": "success"})
+    elif webrtc_id and webrtc_id not in self.pcs:
+        reset_conversation_history()
     return await _original_webrtc_handle_offer(self, body, set_outputs)
 
 
